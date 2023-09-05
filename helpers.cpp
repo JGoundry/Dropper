@@ -7,11 +7,10 @@
 */
 
 #include "PEstructs.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "helpers.h"
-
-typedef HMODULE (WINAPI * LoadLibrary_t)(LPCSTR lpFileName);
-LoadLibrary_t pLoadLibraryA = NULL;
-
 
 
 HMODULE WINAPI hlpGetModuleHandle(LPCWSTR sModuleName) {
@@ -20,7 +19,7 @@ HMODULE WINAPI hlpGetModuleHandle(LPCWSTR sModuleName) {
 #ifdef _M_IX86 
 	PEB * ProcEnvBlk = (PEB *) __readfsdword(0x30);
 #else
-	PEB * ProcEnvBlk = (PEB *) __readgsqword(0x60);
+	PEB * ProcEnvBlk = (PEB *)__readgsqword(0x60);
 #endif
 
 	// return base address of a calling module
@@ -41,7 +40,7 @@ HMODULE WINAPI hlpGetModuleHandle(LPCWSTR sModuleName) {
 		LDR_DATA_TABLE_ENTRY * pEntry = (LDR_DATA_TABLE_ENTRY *) ((BYTE *) pListEntry - sizeof(LIST_ENTRY));
 
 		// check if module is found and return its base address
-		if (lstrcmpiW(pEntry->BaseDllName.Buffer, sModuleName) == 0)
+		if (strcmp((const char *) pEntry->BaseDllName.Buffer, (const char *) sModuleName) == 0)
 			return (HMODULE) pEntry->DllBase;
 	}
 
@@ -93,33 +92,6 @@ FARPROC WINAPI hlpGetProcAddress(HMODULE hMod, char * sProcName) {
 				break;
 			}
 		}
-	}
-
-	// check if found VA is forwarded to external library.function
-	if ((char *) pProcAddr >= (char *) pExportDirAddr && 
-		(char *) pProcAddr < (char *) (pExportDirAddr + pExportDataDir->Size)) {
-		
-		char * sFwdDLL = _strdup((char *) pProcAddr); 	// get a copy of library.function string
-		if (!sFwdDLL) return NULL;
-
-		// get external function name
-		char * sFwdFunction = strchr(sFwdDLL, '.');
-		*sFwdFunction = 0;					// set trailing null byte for external library name -> library\x0function
-		sFwdFunction++;						// shift a pointer to the beginning of function name
-
-		// resolve LoadLibrary function pointer, keep it as global variable
-		if (pLoadLibraryA == NULL) {
-			pLoadLibraryA = (LoadLibrary_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LoadLibraryA");
-			if (pLoadLibraryA == NULL) return NULL;
-		}
-
-		// load the external library
-		HMODULE hFwd = pLoadLibraryA(sFwdDLL);
-		free(sFwdDLL);							// release the allocated memory for lib.func string copy
-		if (!hFwd) return NULL;
-
-		// get the address of function the original call is forwarded to
-		pProcAddr = hlpGetProcAddress(hFwd, sFwdFunction);
 	}
 
 	return (FARPROC) pProcAddr;
