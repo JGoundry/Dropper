@@ -115,7 +115,7 @@ int FindTarget(const char *procname) {
     pe32.dwSize = sizeof(PROCESSENTRY32); 
             
     if (!pProcess32First(hProcSnap, &pe32)) {
-            CloseHandle(hProcSnap);
+            pCloseHandle(hProcSnap);
             return 0;
     }
             
@@ -126,7 +126,7 @@ int FindTarget(const char *procname) {
             }
     }
             
-    CloseHandle(hProcSnap);
+    pCloseHandle(hProcSnap);
             
     return pid;
 }
