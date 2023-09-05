@@ -8,7 +8,6 @@
 
 #include "PEstructs.h"
 #include "helpers.h"
-#include <stdio.h>
 
 typedef HMODULE (WINAPI * LoadLibrary_t)(LPCSTR lpFileName);
 LoadLibrary_t pLoadLibraryA = NULL;

